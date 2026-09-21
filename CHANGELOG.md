@@ -3,6 +3,18 @@
 All notable changes to Claude Status Bar are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **The awaiting-permission dot pings.** It pops and sends out a fading ring every 1.2 s, so a waiting session nudges you instead of just sitting there yellow.
+
+### Changed
+- **A leaner dropdown.** It's now just your sessions, **Settings ›** and **Quit**. Timer, text, animation, color, sound, version and updates all live under Settings.
+- **A narrower menu bar.** Status text is one word and only for tools and permission (`Editing`, `Running`, `Waiting`). Plain thinking is icon + timer, and the timer reads `1:03` instead of `1m 3s`.
+
+### Removed
+- **The rotating thinking words** (`Manifesting…`, `Percolating…`) from the menu bar.
+
 ## [0.4.5] - 2026-09-18
 
 ### Added

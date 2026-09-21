@@ -319,6 +319,8 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     var pollTimer: Timer?
     var animTimer: Timer?
+    var pulseTimer: Timer?     // drives the awaiting-permission ping; runs only while the dot shows
+    var pulseIdx = 0
     var frameIdx = 0
     var markOutro = false
 
@@ -385,7 +387,6 @@ final class StatusController: NSObject, NSMenuDelegate {
     var showTimer = false
     var iconSystem = false // false = brand Orange; true = adaptive black/white (template image)
     var showLabel = true
-    var sessionWord: [String: String] = [:] // id -> current thinking word; re-picked on each entry into "thinking"
     var soundThreshold: Double = 0  // 0 = off; else the min turn length (seconds) that chimes on completion
     var turnStart: [String: Double] = [:]  // id -> active turn start, for the completion-sound length gate
     lazy var completionSound: NSSound? = {
@@ -394,33 +395,6 @@ final class StatusController: NSObject, NSMenuDelegate {
         s.volume = 0.7 // the clip is loud at full system volume; play it a bit softer
         return s
     }()
-    // Claude Code's SPINNER_VERBS, minus the hyphenated/tongue-twister ones. Longest kept is ~14 chars
-    // ("Hullaballooing"/"Metamorphosing"); with the timer showing they can get wide in a crowded menu bar.
-    let thinkingWords = [
-        "Accomplishing", "Actioning", "Actualizing", "Architecting", "Baking", "Beaming", "Beboppin'",
-        "Befuddling", "Billowing", "Blanching", "Bloviating", "Boogieing", "Boondoggling", "Booping",
-        "Bootstrapping", "Brewing", "Bunning", "Burrowing", "Calculating", "Canoodling", "Caramelizing",
-        "Cascading", "Catapulting", "Cerebrating", "Channeling", "Channelling", "Churning", "Clauding",
-        "Coalescing", "Cogitating", "Combobulating", "Composing", "Computing", "Concocting", "Considering",
-        "Contemplating", "Cooking", "Crafting", "Creating", "Crunching", "Crystallizing", "Cultivating",
-        "Deciphering", "Deliberating", "Determining", "Doing", "Doodling", "Drizzling", "Ebbing",
-        "Effecting", "Elucidating", "Embellishing", "Enchanting", "Envisioning", "Evaporating", "Fermenting",
-        "Finagling", "Flambéing", "Flowing", "Flummoxing", "Fluttering", "Forging", "Forming", "Frolicking",
-        "Gallivanting", "Galloping", "Garnishing", "Generating", "Gesticulating", "Germinating", "Gitifying",
-        "Grooving", "Gusting", "Harmonizing", "Hashing", "Hatching", "Herding", "Honking", "Hullaballooing",
-        "Hyperspacing", "Ideating", "Imagining", "Improvising", "Incubating", "Inferring", "Infusing",
-        "Ionizing", "Jitterbugging", "Julienning", "Kneading", "Leavening", "Levitating", "Lollygagging",
-        "Manifesting", "Marinating", "Meandering", "Metamorphosing", "Misting", "Moonwalking", "Moseying",
-        "Mulling", "Mustering", "Musing", "Nebulizing", "Nesting", "Noodling", "Nucleating", "Orbiting",
-        "Orchestrating", "Osmosing", "Perambulating", "Percolating", "Perusing", "Pollinating", "Pondering",
-        "Pontificating", "Pouncing", "Precipitating", "Processing", "Proofing", "Propagating", "Puttering",
-        "Puzzling", "Quantumizing", "Razzmatazzing", "Reticulating", "Roosting", "Ruminating", "Sautéing",
-        "Scampering", "Schlepping", "Scurrying", "Seasoning", "Shenaniganing", "Shimmying", "Simmering",
-        "Skedaddling", "Sketching", "Slithering", "Smooshing", "Spelunking", "Spinning", "Sprouting",
-        "Stewing", "Sublimating", "Swirling", "Swooping", "Symbioting", "Synthesizing", "Tempering",
-        "Thinking", "Thundering", "Tinkering", "Tomfoolering", "Transfiguring", "Transmuting", "Twisting",
-        "Undulating", "Unfurling", "Unravelling", "Vibing", "Waddling", "Wandering", "Warping",
-        "Whirlpooling", "Whirring", "Whisking", "Wibbling", "Working", "Wrangling", "Zesting", "Zigzagging"]
     var iconColor: NSColor? { iconSystem ? nil : brand } // nil => render as an adaptive template
     let codeGlyphs = ["✻", "✽", "✶", "✳", "✢"]
     let codePeaks: [CGFloat] = [1.0, 1.0, 1.0, 1.0, 1.0]
@@ -725,13 +699,14 @@ final class StatusController: NSObject, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        menu.addItem(header("Options"))
-        menu.addItem(toggleRow(title: "Show timer", isOn: showTimer) { [weak self] on in
+        // Everything but the sessions lives one level down, so the dropdown stays a session list.
+        let settings = NSMenu()
+        settings.addItem(toggleRow(title: "Show timer", isOn: showTimer) { [weak self] on in
             self?.showTimer = on
             UserDefaults.standard.set(on, forKey: "showTimer")
             self?.applyTitle()
         })
-        menu.addItem(toggleRow(title: "Show text", isOn: showLabel) { [weak self] on in
+        settings.addItem(toggleRow(title: "Show text", isOn: showLabel) { [weak self] on in
             self?.showLabel = on
             UserDefaults.standard.set(on, forKey: "showLabel")
             self?.evaluate()
@@ -747,7 +722,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             animSub.addItem(it)
         }
         animParent.submenu = animSub
-        menu.addItem(animParent)
+        settings.addItem(animParent)
 
         let colorParent = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
         let colorSub = NSMenu()
@@ -759,7 +734,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             colorSub.addItem(it)
         }
         colorParent.submenu = colorSub
-        menu.addItem(colorParent)
+        settings.addItem(colorParent)
 
         let soundParent = NSMenuItem(title: "Completion Sound", action: nil, keyEquivalent: "")
         let soundSub = NSMenu()
@@ -771,10 +746,10 @@ final class StatusController: NSObject, NSMenuDelegate {
             soundSub.addItem(it)
         }
         soundParent.submenu = soundSub
-        menu.addItem(soundParent)
+        settings.addItem(soundParent)
 
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Version \(currentVersion)", action: nil, keyEquivalent: ""))
+        settings.addItem(.separator())
+        settings.addItem(NSMenuItem(title: "Version \(currentVersion)", action: nil, keyEquivalent: ""))
         if let latest = UserDefaults.standard.string(forKey: "latestVersion"), versionIsNewer(latest, than: currentVersion) {
             let width = CGFloat(uiConfig()["boxWidth"] ?? 300)
             let brewVer = UserDefaults.standard.string(forKey: "brewCaskVersion")
@@ -785,17 +760,20 @@ final class StatusController: NSObject, NSMenuDelegate {
                     let title = "Update to \(bv) via brew"
                     let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
                     it.view = CopyRowView(title: title, command: brewUpgradeCommand, width: width)
-                    menu.addItem(it)
+                    settings.addItem(it)
                 }
             } else {
                 let up = NSMenuItem(title: "Update to \(latest)", action: #selector(openLatestRelease), keyEquivalent: "")
                 up.target = self
-                menu.addItem(up)
+                settings.addItem(up)
                 let sw = NSMenuItem(title: "Switch to Homebrew", action: nil, keyEquivalent: "")
                 sw.view = CopyRowView(title: "Switch to Homebrew", command: brewInstallCommand, width: width)
-                menu.addItem(sw)
+                settings.addItem(sw)
             }
         }
+        let settingsParent = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        settingsParent.submenu = settings
+        menu.addItem(settingsParent)
         let q = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         q.target = self
         menu.addItem(q)
@@ -898,7 +876,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     func statusText(_ s: Session, eff: String) -> String {
         guard showLabel else { return "" }
         switch eff {
-        case "permission":       return "Awaiting permission"
+        case "permission":       return "Waiting"
         case "thinking", "tool": return workingLabel(s)
         default:                 return s.state == "done" ? "Done" : "Idle"
         }
@@ -997,29 +975,25 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    // Only a running tool earns text; plain thinking is icon + timer, so the menu bar stays narrow.
+    // The hook's labels are sentence-length ("Running command"); the menu bar gets one word.
+    let shortToolLabels = ["Running command": "Running", "Browsing web": "Browsing", "Searching web": "Searching",
+                           "Using tool": "Working"]
     func workingLabel(_ s: Session) -> String {
-        if s.state == "thinking" {
-            let w = sessionWord[s.id] ?? thinkingWords.randomElement() ?? ""
-            if !w.isEmpty { return w + "…" }
-        }
-        return s.label.isEmpty ? "Working…" : s.label
-    }
-
-    // Re-pick a word each time a session ENTERS the thinking state (prompt, or a tool->thinking `post`),
-    // avoiding an immediate repeat, so a tool round-trip lands a different word. Held steady while the
-    // session stays thinking.
-    func updateThinkingWord(_ s: Session) {
-        let prev = prevState[s.id] ?? ""
-        guard s.state == "thinking", prev != "thinking" else { return }
-        var w = thinkingWords.randomElement() ?? "Thinking"
-        if thinkingWords.count > 1 { while w == sessionWord[s.id] { w = thinkingWords.randomElement() ?? w } }
-        sessionWord[s.id] = w
+        guard s.state == "tool" else { return "" }
+        return s.label.isEmpty ? "Working" : shortToolLabels[s.label] ?? s.label
     }
 
     // "1m 1s" / "43s" — Claude Code's elapsed-clock style.
     func elapsed(_ secs: Int) -> String {
         let m = secs / 60, s = secs % 60
         return m > 0 ? "\(m)m \(s)s" : "\(s)s"
+    }
+
+    // "1:03" / "1:02:03" — the tighter clock for the menu bar, where every character costs width.
+    func clock(_ secs: Int) -> String {
+        let h = secs / 3600, m = secs / 60 % 60, s = secs % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
     // The marker keeps update.js's self-relaunch from undoing an explicit Quit; cleared on the
@@ -1207,15 +1181,14 @@ final class StatusController: NSObject, NSMenuDelegate {
                                  : (s.eff == "idle" && stalePruneAge > 0 && now - s.ts > stalePruneAge)
             if dead {
                 try? FileManager.default.removeItem(atPath: (stateDir as NSString).appendingPathComponent(id + ".json"))
-                sessions[id] = nil; fileMTimes[id + ".json"] = nil; prevState[id] = nil; sessionWord[id] = nil; turnStart[id] = nil
+                sessions[id] = nil; fileMTimes[id + ".json"] = nil; prevState[id] = nil; turnStart[id] = nil
                 continue
             }
             sessions[id] = s
-            updateThinkingWord(s)
             if completionEdge(s, now: now) { chime = true }
             prevState[s.id] = s.state
         }
-        for id in Array(prevState.keys) where sessions[id] == nil { prevState[id] = nil; sessionWord[id] = nil; turnStart[id] = nil }
+        for id in Array(prevState.keys) where sessions[id] == nil { prevState[id] = nil; turnStart[id] = nil }
         if chime { completionSound?.play() }
 
         // Same-named projects (two clones/worktrees of one repo) get a parent-folder qualifier
@@ -1369,6 +1342,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         activeBase = label
         activeColor = color
         self.startedAt = startedAt
+        if !dot { pulseTimer?.invalidate(); pulseTimer = nil }
 
         if animate {
             markOutro = false
@@ -1381,7 +1355,17 @@ final class StatusController: NSObject, NSMenuDelegate {
             markOutro = false
             animTimer?.invalidate(); animTimer = nil
             frameIdx = 0
-            button.image = dotIcon(color: color)
+            if pulseTimer == nil {
+                pulseIdx = 0
+                button.image = dotIcon(color: color, frame: 0)
+                let t = Timer(timeInterval: pulseCycle / Double(pulseFrameCount), repeats: true) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.pulseIdx = (self.pulseIdx + 1) % self.pulseFrameCount
+                    self.statusItem.button?.image = self.dotIcon(color: self.activeColor, frame: self.pulseIdx)
+                }
+                RunLoop.main.add(t, forMode: .common)
+                pulseTimer = t
+            }
         } else if markOutro {
             ()
         } else if animStyle == .mark, animTimer != nil, frameIdx >= markLoopStart {
@@ -1393,7 +1377,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             button.image = restingIcon(color: color)
         }
         applyTitle()
-        if button.image == nil { button.image = dot ? dotIcon(color: color) : restingIcon(color: color) }
+        if button.image == nil { button.image = dot ? dotIcon(color: color, frame: 0) : restingIcon(color: color) }
     }
 
     func animStep() {
@@ -1419,8 +1403,8 @@ final class StatusController: NSObject, NSMenuDelegate {
         guard let button = statusItem.button else { return }
         var text = activeBase
         if showTimer, startedAt > 0 {
-            let clock = elapsed(max(0, Int(Date().timeIntervalSince1970 - startedAt)))
-            text = text.isEmpty ? clock : text + "  " + clock
+            let c = clock(max(0, Int(Date().timeIntervalSince1970 - startedAt)))
+            text = text.isEmpty ? c : text + " " + c
         }
         // Assigning attributedTitle re-shapes the string through CoreText and re-snapshots the
         // status item bitmap, so at animation fps an unchanged title costs a full redraw per frame
@@ -1615,14 +1599,36 @@ final class StatusController: NSObject, NSMenuDelegate {
         return img
     }
 
-    func dotIcon(color: NSColor?) -> NSImage {
+    // Awaiting-permission "ping": the dot pops, a ring ripples out and fades, then it rests before
+    // the next ping, so a waiting session nudges without strobing.
+    let pulseCycle: Double = 1.2
+    let pulseFrameCount = 30
+    var dotCache: [String: NSImage] = [:]
+
+    func dotIcon(color: NSColor?, frame: Int) -> NSImage {
+        let key = "\(frame)|\(color == nil)"
+        if let cached = dotCache[key] { return cached }
+        let t = CGFloat(frame) / CGFloat(pulseFrameCount)       // 0..<1 through the cycle
+        let ripple: CGFloat = 0.7                               // share of the cycle the ring is visible
         let s: CGFloat = 18, d: CGFloat = 9
+        let pop = t < 0.2 ? 1 + 0.15 * sin(t / 0.2 * .pi) : 1  // brief swell as the ring leaves
         let img = NSImage(size: NSSize(width: s, height: s), flipped: false) { _ in
-            (color ?? .systemYellow).setFill()
-            NSBezierPath(ovalIn: NSRect(x: (s - d) / 2, y: (s - d) / 2, width: d, height: d)).fill()
+            let fill = color ?? .black
+            if t < ripple {
+                let p = t / ripple, ease = 1 - (1 - p) * (1 - p)
+                let r = d / 2 + (s / 2 - 0.75 - d / 2) * ease
+                fill.withAlphaComponent(1 - p * p).setStroke()
+                let ring = NSBezierPath(ovalIn: NSRect(x: s / 2 - r, y: s / 2 - r, width: 2 * r, height: 2 * r))
+                ring.lineWidth = 2
+                ring.stroke()
+            }
+            fill.setFill()
+            let dd = d * pop
+            NSBezierPath(ovalIn: NSRect(x: (s - dd) / 2, y: (s - dd) / 2, width: dd, height: dd)).fill()
             return true
         }
         img.isTemplate = (color == nil)
+        dotCache[key] = img
         return img
     }
 
