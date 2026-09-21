@@ -39,8 +39,8 @@ Or just run `brew upgrade --cask claude-status-bar` (brew), or download the late
 ## What it shows
 
 - **Thinking / working** — the icon animates, with a live `1:01` timer.
-- **Running a tool** — a short label (`Editing`, `Reading`, `Running command`, `Using tool`, …).
-- **Awaiting permission** — a paused yellow dot, in both the CLI and the Desktop app.
+- **Running a tool** — a one-word label (`Editing`, `Reading`, `Running`, `Working`, …).
+- **Awaiting permission** — a yellow dot that pings, labelled `Waiting`, in both the CLI and the Desktop app.
 - **Idle / done** — rests on the Claude logo.
 
 The dropdown lists your sessions; everything else lives under **Settings ›**:
