@@ -38,15 +38,16 @@ Or just run `brew upgrade --cask claude-status-bar` (brew), or download the late
 
 ## What it shows
 
-- **Thinking / working** — the icon animates, with a live `1m 1s` timer.
-- **Running a tool** — a short label (`Editing`, `Reading`, `Running command`, `Using tool`, …).
-- **Awaiting permission** — a paused yellow dot, in both the CLI and the Desktop app.
+- **Thinking / working** — the icon animates, with a live `1:01` timer.
+- **Running a tool** — a one-word label (`Editing`, `Reading`, `Running`, `Working`, …).
+- **Awaiting permission** — a yellow dot that pings, labelled `Waiting`, in both the CLI and the Desktop app.
+- **Your turn** — a blue dot that pings, labelled `Your turn`, when Claude's reply ends on a question or hands you a `! command` to run. It rests after 30 minutes.
 - **Idle / done** — rests on the Claude logo.
 
-Everything is controlled from the menu:
+The dropdown lists your sessions; everything else lives under **Settings ›**:
 
-- **Show timer:** toggle the elapsed `1m 1s` clock.
-- **Show text:** show the status label next to the icon (`Manifesting…`, `Percolating…`, `Editing`, `Running command`), or turn it off for an icon-only menu bar (on by default).
+- **Show timer:** toggle the elapsed `1:01` clock.
+- **Show text:** show what a running tool is doing next to the icon in one word (`Editing`, `Running`, `Waiting`); plain thinking stays icon + timer. Turn it off for an icon-only menu bar (on by default).
 - **Animation style:**
   - **Spark**, the web/chat "morph" spark
   - **Unicode**, the terminal glyph spinner
