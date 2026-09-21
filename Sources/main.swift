@@ -379,6 +379,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     let brand = NSColor(srgbRed: 0.851, green: 0.467, blue: 0.341, alpha: 1) // #d97757, Anthropic's official "Orange" accent
     let amber = NSColor(srgbRed: 0.95, green: 0.73, blue: 0.18, alpha: 1) // "awaiting permission" yellow dot
+    let turnBlue = NSColor(srgbRed: 0.31, green: 0.58, blue: 1.0, alpha: 1) // "your turn": the reply asks you something
     let frames: [NSImage] = StatusController.loadFrames()
     let spriteFPS: Double = 9 // tune: 8 frames per loop -> ~0.9s/cycle
 
@@ -662,7 +663,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         let allOrdered = sessions.values.sorted { $0.ts > $1.ts }   // most-recent first
         let ordered = allOrdered.filter { s in
                 let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
-                let resting = !(eff == "permission" || eff == "thinking" || eff == "tool")
+                let resting = !(eff == "permission" || eff == "yourturn" || eff == "thinking" || eff == "tool")
                 let gated = s.entrypoint == "claude-desktop"   // only the desktop app is gated
                 return !gated || s.started || !resting
             }
@@ -671,7 +672,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         // (and thus liveness) is untouched — see stalePruneAge and the pid-driven reap in evaluate().
         var visible = ordered.filter { s in
             let eff = s.eff.isEmpty ? effectiveState(s, now: now) : s.eff
-            let resting = !(eff == "permission" || eff == "thinking" || eff == "tool")
+            let resting = !(eff == "permission" || eff == "yourturn" || eff == "thinking" || eff == "tool")
             return !(stalePruneAge > 0 && resting && now - s.ts > stalePruneAge)
         }
         if visible.isEmpty, let lead = ordered.first { visible = [lead] }   // floor: never empty while alive
@@ -854,7 +855,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         // sizes to the free space; this only guards against pathological strings.
         let nameMax = Int(cfg["nameMax"] ?? 30)
         let working = (eff == "thinking" || eff == "tool") && s.startedAt > 0
-        let resting = !(eff == "permission" || eff == "thinking" || eff == "tool")  // the dim caret
+        let resting = !(eff == "permission" || eff == "yourturn" || eff == "thinking" || eff == "tool")  // the dim caret
         let tag = surfaceTag(s.entrypoint)
         v.configure(icon: sessionSymbol(s, eff: eff),
                     iconTint: resting ? .tertiaryLabelColor : .labelColor,  // caret dim; spinner matches the name font; amber image ignores tint
@@ -877,6 +878,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         guard showLabel else { return "" }
         switch eff {
         case "permission":       return "Waiting"
+        case "yourturn":         return "Your turn"
         case "thinking", "tool": return workingLabel(s)
         default:                 return s.state == "done" ? "Done" : "Idle"
         }
@@ -929,6 +931,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     func sessionSymbol(_ s: Session, eff: String) -> NSImage? {
         switch eff {
         case "permission":       return symbolImage("exclamationmark.circle.fill", tint: amber)
+        case "yourturn":         return symbolImage("questionmark.circle.fill", tint: turnBlue)
         case "thinking", "tool": return nil
         default:                 return restingCaret   // done/idle merged: dim "ready for input" caret
         }
@@ -969,7 +972,8 @@ final class StatusController: NSObject, NSMenuDelegate {
     // permission / thinking / tool / idle (done collapses to idle; waiting is never emitted).
     func priority(of eff: String) -> Int {
         switch eff {
-        case "permission":       return 2
+        case "permission":       return 3
+        case "yourturn":         return 2   // needs you too, so it outranks a session that's merely working
         case "thinking", "tool": return 1
         default:                 return 0   // idle / unknown
         }
@@ -1222,6 +1226,8 @@ final class StatusController: NSObject, NSMenuDelegate {
         switch lead.eff {
         case "permission":
             render(label: statusText(lead, eff: lead.eff), color: amber, animate: false, startedAt: 0, dot: true)
+        case "yourturn":
+            render(label: statusText(lead, eff: lead.eff), color: turnBlue, animate: false, startedAt: 0, dot: true)
         case "thinking", "tool":
             render(label: statusText(lead, eff: lead.eff), color: iconColor, animate: true, startedAt: lead.startedAt)
         default:
@@ -1253,7 +1259,52 @@ final class StatusController: NSObject, NSMenuDelegate {
                last.contains("interrupted by user") { return "idle" }
             return s.state
         }
-        return s.state == "done" ? "idle" : s.state
+        if s.state == "done" {
+            // A finished turn that ends on a question (or hands you a `! command`) still needs you.
+            // It stops pinging after half an hour so a forgotten session doesn't nag all day.
+            if now - s.ts < 1800, !s.transcript.isEmpty, cachedAsksUser(s.transcript) { return "yourturn" }
+            return "idle"
+        }
+        return s.state
+    }
+
+    // Did the last assistant reply ask for something? A question on one of its closing lines, or a
+    // line starting "! " (a command for you to run in the prompt). Cached on transcript mtime.
+    func cachedAsksUser(_ path: String) -> Bool {
+        let m = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+        if let hit = asksUserCache[path], hit.mtime == m { return hit.asks }
+        let asks = lastAssistantText(ofFileAt: path).map(asksUser) ?? false
+        asksUserCache[path] = (m, asks)
+        return asks
+    }
+
+    func asksUser(_ text: String) -> Bool {
+        let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if lines.contains(where: { $0.hasPrefix("! ") }) { return true }
+        // Ignore trailing markdown decoration so "**…?**" or "…?)" still counts.
+        return lines.suffix(3).contains { l in
+            let t = l.trimmingCharacters(in: CharacterSet(charactersIn: "*_`)]»\"' "))
+            return t.hasSuffix("?") || t.hasSuffix("？")
+        }
+    }
+
+    // Text blocks of the transcript's last assistant line. Replies can be long, so this reads a wider
+    // tail than lastTurnLine; it only runs when a session has just finished (mtime-cached).
+    func lastAssistantText(ofFileAt path: String) -> String? {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? fh.close() }
+        let size = (try? fh.seekToEnd()) ?? 0
+        let chunk: UInt64 = 131072
+        try? fh.seek(toOffset: size > chunk ? size - chunk : 0)
+        guard let data = try? fh.readToEnd(), let str = String(data: data, encoding: .utf8) else { return nil }
+        for line in str.split(separator: "\n").reversed() where line.contains("\"type\":\"assistant\"") {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let msg = obj["message"] as? [String: Any],
+                  let content = msg["content"] as? [[String: Any]] else { continue }
+            let texts = content.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
+            if !texts.isEmpty { return texts.joined(separator: "\n") }
+        }
+        return nil
     }
 
 
@@ -1604,9 +1655,10 @@ final class StatusController: NSObject, NSMenuDelegate {
     let pulseCycle: Double = 1.2
     let pulseFrameCount = 30
     var dotCache: [String: NSImage] = [:]
+    var asksUserCache: [String: (mtime: Date?, asks: Bool)] = [:]
 
     func dotIcon(color: NSColor?, frame: Int) -> NSImage {
-        let key = "\(frame)|\(color == nil)"
+        let key = "\(frame)|\(color?.description ?? "template")"
         if let cached = dotCache[key] { return cached }
         let t = CGFloat(frame) / CGFloat(pulseFrameCount)       // 0..<1 through the cycle
         let ripple: CGFloat = 0.7                               // share of the cycle the ring is visible

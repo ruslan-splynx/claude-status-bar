@@ -41,6 +41,7 @@ Or just run `brew upgrade --cask claude-status-bar` (brew), or download the late
 - **Thinking / working** — the icon animates, with a live `1:01` timer.
 - **Running a tool** — a one-word label (`Editing`, `Reading`, `Running`, `Working`, …).
 - **Awaiting permission** — a yellow dot that pings, labelled `Waiting`, in both the CLI and the Desktop app.
+- **Your turn** — a blue dot that pings, labelled `Your turn`, when Claude's reply ends on a question or hands you a `! command` to run. It rests after 30 minutes.
 - **Idle / done** — rests on the Claude logo.
 
 The dropdown lists your sessions; everything else lives under **Settings ›**:

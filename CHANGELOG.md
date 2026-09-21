@@ -7,6 +7,7 @@ All notable changes to Claude Status Bar are documented here. This project follo
 
 ### Added
 - **The awaiting-permission dot pings.** It pops and sends out a fading ring every 1.2 s, so a waiting session nudges you instead of just sitting there yellow.
+- **A blue "Your turn" ping.** When a reply ends on a question or gives you a `! command` to run, the menu bar pings blue until you answer (or for 30 minutes), so a session waiting on you doesn't look finished.
 
 ### Changed
 - **A leaner dropdown.** It's now just your sessions, **Settings ›** and **Quit**. Timer, text, animation, color, sound, version and updates all live under Settings.
